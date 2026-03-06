@@ -410,9 +410,95 @@ const CLIENT_ID    = 'opmaorru49f4fb04215819ehwbxf53';
 const REDIRECT_URI = 'https://nickorsrb-dot.github.io/d20rollforobs.github.io/kael-d20-table.html';
 const ABLY_KEY     = 'L2nSig.le1OAw:yDML7_Ik8E0ov0C0lmkc-2DjUVufnR9qXsC-Jhdmrbk';
 const COOLDOWN_MS  = 5 * 60 * 1000;
+const ADMIN_USERS  = ['nickdelnara']; // безлимит
 
 // ══ STATE ══
 let user = null, onCooldown = false, cdInterval = null, overlayBusy = false, pendingRoll = null;
+
+// ══ SOUNDS ══
+function playSound(type) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    if (type === 'events' || type === 'calls') {
+      // Кристалл/колокол — уже знакомый
+      const base = type === 'calls' ? 396 : 528;
+      [[base,0.18,0],[base*1.5,0.10,2],[base*2,0.07,-3],[base*0.5,0.06,1]].forEach(([freq,gain,det],i)=>{
+        const o=ctx.createOscillator(), g=ctx.createGain();
+        o.type='sine'; o.frequency.setValueAtTime(freq,ctx.currentTime); o.detune.setValueAtTime(det,ctx.currentTime);
+        const t=ctx.currentTime+i*0.04;
+        g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(gain,t+0.012);
+        g.gain.exponentialRampToValueAtTime(gain*0.3,t+0.4); g.gain.exponentialRampToValueAtTime(0.001,t+3.5);
+        o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+3.6);
+      });
+      const sh=ctx.createOscillator(), shg=ctx.createGain();
+      sh.type='sine'; sh.frequency.setValueAtTime(base*4,ctx.currentTime);
+      shg.gain.setValueAtTime(0,ctx.currentTime); shg.gain.linearRampToValueAtTime(0.04,ctx.currentTime+0.02);
+      shg.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+1.2);
+      sh.connect(shg); shg.connect(ctx.destination); sh.start(ctx.currentTime); sh.stop(ctx.currentTime+1.3);
+      setTimeout(()=>ctx.close(),4000);
+
+    } else if (type === 'narr') {
+      // Повествование — низкий дрон + струнный обертон, как открывающаяся книга
+      const now = ctx.currentTime;
+      // Глубокий дрон
+      const drone = ctx.createOscillator(), droneG = ctx.createGain();
+      drone.type = 'sine'; drone.frequency.setValueAtTime(110, now);
+      drone.frequency.linearRampToValueAtTime(116, now+2);
+      droneG.gain.setValueAtTime(0,now); droneG.gain.linearRampToValueAtTime(0.12,now+0.3);
+      droneG.gain.linearRampToValueAtTime(0.08,now+1.5); droneG.gain.exponentialRampToValueAtTime(0.001,now+3.5);
+      drone.connect(droneG); droneG.connect(ctx.destination); drone.start(now); drone.stop(now+3.6);
+      // Мягкий струнный обертон
+      [[220,0.06],[330,0.04],[440,0.025]].forEach(([freq,gain],i)=>{
+        const o=ctx.createOscillator(), g=ctx.createGain();
+        o.type='triangle'; o.frequency.setValueAtTime(freq,now);
+        const t=now+i*0.08+0.1;
+        g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(gain,t+0.15);
+        g.gain.exponentialRampToValueAtTime(0.001,t+2.5);
+        o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+2.6);
+      });
+      // Тихий высокий выдох
+      const whisper=ctx.createOscillator(), wg=ctx.createGain();
+      whisper.type='sine'; whisper.frequency.setValueAtTime(880,now+0.2);
+      whisper.frequency.linearRampToValueAtTime(660,now+1.5);
+      wg.gain.setValueAtTime(0,now+0.2); wg.gain.linearRampToValueAtTime(0.03,now+0.5);
+      wg.gain.exponentialRampToValueAtTime(0.001,now+2.0);
+      whisper.connect(wg); wg.connect(ctx.destination); whisper.start(now+0.2); whisper.stop(now+2.1);
+      setTimeout(()=>ctx.close(),4000);
+
+    } else if (type === 'boss-buff' || type === 'boss-debuff') {
+      // Бой — металлический удар с резким затуханием
+      const now = ctx.currentTime;
+      const isBuff = type === 'boss-buff';
+      const base = isBuff ? 220 : 160; // баф выше, дебаф ниже
+      // Основной удар
+      const strike=ctx.createOscillator(), sg=ctx.createGain();
+      strike.type='sawtooth'; strike.frequency.setValueAtTime(base*2,now);
+      strike.frequency.exponentialRampToValueAtTime(base*0.5,now+0.3);
+      sg.gain.setValueAtTime(0,now); sg.gain.linearRampToValueAtTime(0.25,now+0.005);
+      sg.gain.exponentialRampToValueAtTime(0.001,now+0.8);
+      strike.connect(sg); sg.connect(ctx.destination); strike.start(now); strike.stop(now+0.9);
+      // Металлический резонанс
+      [[base*3,0.08],[base*5,0.05],[base*7,0.03]].forEach(([freq,gain])=>{
+        const o=ctx.createOscillator(), g=ctx.createGain();
+        o.type='sine'; o.frequency.setValueAtTime(freq,now);
+        g.gain.setValueAtTime(0,now); g.gain.linearRampToValueAtTime(gain,now+0.008);
+        g.gain.exponentialRampToValueAtTime(0.001,now+(isBuff?1.8:1.2));
+        o.connect(g); g.connect(ctx.destination); o.start(now); o.stop(now+(isBuff?1.9:1.3));
+      });
+      // Для бафа — финальный восходящий тон
+      if (isBuff) {
+        const rise=ctx.createOscillator(), rg=ctx.createGain();
+        rise.type='sine'; rise.frequency.setValueAtTime(440,now+0.15);
+        rise.frequency.linearRampToValueAtTime(660,now+0.5);
+        rg.gain.setValueAtTime(0,now+0.15); rg.gain.linearRampToValueAtTime(0.06,now+0.25);
+        rg.gain.exponentialRampToValueAtTime(0.001,now+1.2);
+        rise.connect(rg); rg.connect(ctx.destination); rise.start(now+0.15); rise.stop(now+1.3);
+      }
+      setTimeout(()=>ctx.close(),2500);
+    }
+  } catch(e) { console.log('Sound error:',e); }
+}
 
 // ══ ABLY ══
 const ably        = new Ably.Realtime(ABLY_KEY);
@@ -502,9 +588,11 @@ function publishRoll(payload) {
 }
 
 // ══ ROLL ══
+function isAdmin() { return user && ADMIN_USERS.includes(user.name.toLowerCase()); }
+
 function roll(type) {
   if (!user) { setStatus('Сначала войди через Twitch','err'); return; }
-  if (onCooldown) return;
+  if (onCooldown && !isAdmin()) return;
 
   let data, resId, tbId;
   if (type==='events')     { data=events;    resId='res-events'; tbId='tb-events'; }
@@ -528,12 +616,17 @@ function roll(type) {
       <div class="die-text">${e.desc.replace(/<[^>]+>/g,'')}${e.hint?' → '+e.hint:''}</div>
     `;
     res.style.opacity=1;
+    playSound(type);
     const row=document.getElementById(tbId+'-'+e.roll);
     if(row){ setTimeout(()=>{ row.classList.add(hl); row.scrollIntoView({behavior:'smooth',block:'center'}); setTimeout(()=>row.classList.remove(hl),2500); },350); }
   },180);
 
-  localStorage.setItem(getCdKey(), Date.now().toString());
-  startCooldownUI(COOLDOWN_MS);
+  if (!isAdmin()) {
+    localStorage.setItem(getCdKey(), Date.now().toString());
+    startCooldownUI(COOLDOWN_MS);
+  } else {
+    setStatus('Admin — без кулдауна', 'ok');
+  }
 
   const payload = { roll:e.roll, type, tag:e.tag, tagLabel:e.tl, name:e.name, desc:e.desc.replace(/<[^>]+>/g,''), hint:e.hint||null, viewer:user.name, isGold };
 
